@@ -1,0 +1,190 @@
+/*
+ *  linux/fs/proc/root.c
+ *
+ *  Copyright (C) 1991, 1992 Linus Torvalds
+ *
+ *  proc root directory handling functions
+ */
+
+#include <asm/uaccess.h>
+
+#include <linux/errno.h>
+#include <linux/sched.h>
+#include <linux/proc_fs.h>
+#include <linux/stat.h>
+#include <linux/config.h>
+#include <linux/init.h>
+#include <asm/bitops.h>
+
+struct proc_dir_entry *proc_net, *proc_bus, *proc_root_fs, *proc_root_driver;
+
+#ifdef CONFIG_SYSCTL
+struct proc_dir_entry *proc_sys_root;
+#endif
+
+/*
+ * /proc/self:
+ */
+static int proc_self_readlink(struct dentry *dentry, char *buffer, int buflen)
+{
+	int len;
+	char tmp[30];
+
+	len = sprintf(tmp, "%d", current->pid);
+	if (buflen < len)
+		len = buflen;
+	copy_to_user(buffer, tmp, len);
+	return len;
+}
+
+static struct dentry * proc_self_follow_link(struct dentry *dentry,
+						struct dentry *base,
+						unsigned int follow)
+{
+	char tmp[30];
+
+	sprintf(tmp, "%d", current->pid);
+	return lookup_dentry(tmp, base, follow);
+}	
+
+static struct inode_operations proc_self_inode_operations = {
+	NULL,			/* no file-ops */
+	NULL,			/* create */
+	NULL,			/* lookup */
+	NULL,			/* link */
+	NULL,			/* unlink */
+	NULL,			/* symlink */
+	NULL,			/* mkdir */
+	NULL,			/* rmdir */
+	NULL,			/* mknod */
+	NULL,			/* rename */
+	proc_self_readlink,	/* readlink */
+	proc_self_follow_link,	/* follow_link */
+};
+
+static struct proc_dir_entry proc_root_self = {
+	0, 4, "self",
+	S_IFLNK | S_IRUGO | S_IWUGO | S_IXUGO, 1, 0, 0,
+	64, &proc_self_inode_operations,
+};
+#ifdef __powerpc__
+static struct proc_dir_entry proc_root_ppc_htab = {
+	0, 8, "ppc_htab",
+	S_IFREG | S_IRUGO|S_IWUSR, 1, 0, 0,
+	0, &proc_ppc_htab_inode_operations,
+};
+#endif
+
+void __init proc_root_init(void)
+{
+	proc_misc_init();
+	proc_register(&proc_root, &proc_root_self);
+	proc_net = proc_mkdir("net", 0);
+#ifdef CONFIG_SYSVIPC
+	proc_mkdir("sysvipc", 0);
+#endif
+#ifdef CONFIG_SYSCTL
+	proc_sys_root = proc_mkdir("sys", 0);
+#endif
+	proc_root_fs = proc_mkdir("fs", 0);
+	proc_root_driver = proc_mkdir("driver", 0);
+#if defined(CONFIG_SUN_OPENPROMFS) || defined(CONFIG_SUN_OPENPROMFS_MODULE)
+#ifdef CONFIG_SUN_OPENPROMFS
+	openpromfs_init ();
+#endif
+	/* just give it a mountpoint */
+	proc_mkdir("openprom", 0);
+#endif
+	proc_tty_init();
+#ifdef __powerpc__
+	proc_register(&proc_root, &proc_root_ppc_htab);
+#endif
+#ifdef CONFIG_PROC_DEVICETREE
+	proc_device_tree_init();
+#endif
+	proc_bus = proc_mkdir("bus", 0);
+}
+
+static struct dentry *proc_root_lookup(struct inode * dir, struct dentry * dentry)
+{
+	struct task_struct *p;
+
+	if (dir->i_ino == PROC_ROOT_INO) { /* check for safety... */
+		extern unsigned long total_forks;
+		static int last_timestamp = 0;
+
+		/*
+		 * this one can be a serious 'ps' performance problem if
+		 * there are many threads running - thus we do 'lazy'
+		 * link-recalculation - we change it only if the number
+		 * of threads has increased.
+		 */
+		if (total_forks != last_timestamp) {
+			int nlink = proc_root.nlink;
+
+			read_lock(&tasklist_lock);
+			last_timestamp = total_forks;
+			for_each_task(p)
+				nlink++;
+			read_unlock(&tasklist_lock);
+			/*
+			 * subtract the # of idle threads which
+			 * do not show up in /proc:
+			 */
+			dir->i_nlink = nlink - smp_num_cpus;
+		}
+	}
+
+	if (!proc_lookup(dir, dentry))
+		return NULL;
+	
+	return proc_pid_lookup(dir, dentry);
+}
+
+static int proc_root_readdir(struct file * filp,
+	void * dirent, filldir_t filldir)
+{
+	unsigned int nr = filp->f_pos;
+
+	if (nr < FIRST_PROCESS_ENTRY) {
+		int error = proc_readdir(filp, dirent, filldir);
+		if (error <= 0)
+			return error;
+		filp->f_pos = FIRST_PROCESS_ENTRY;
+	}
+
+	return proc_pid_readdir(filp, dirent, filldir);
+}
+
+/*
+ * The root /proc directory is special, as it has the
+ * <pid> directories. Thus we don't use the generic
+ * directory handling functions for that..
+ */
+static struct file_operations proc_root_operations = {
+	NULL,			/* lseek - default */
+	NULL,			/* read - bad */
+	NULL,			/* write - bad */
+	proc_root_readdir,	/* readdir */
+};
+
+/*
+ * proc root can do almost nothing..
+ */
+static struct inode_operations proc_root_inode_operations = {
+	&proc_root_operations,	/* default base directory file-ops */
+	NULL,			/* create */
+	proc_root_lookup,	/* lookup */
+};
+
+/*
+ * This is the root "inode" in the /proc tree..
+ */
+struct proc_dir_entry proc_root = {
+	PROC_ROOT_INO, 5, "/proc",
+	S_IFDIR | S_IRUGO | S_IXUGO, 2, 0, 0,
+	0, &proc_root_inode_operations,
+	NULL, NULL,
+	NULL,
+	&proc_root, NULL
+};
