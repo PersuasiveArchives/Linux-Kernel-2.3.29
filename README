@@ -23,39 +23,17 @@ in various files in the Documentation directory.  See DOCUMENTATION below.
 
 WHAT IS LINUX?
 
-  Linux is a Unix clone written from scratch by Linus Torvalds with
-  assistance from a loosely-knit team of hackers across the Net.
-  It aims towards POSIX compliance. 
+  Linux is an open-source, Unix-like operating system that was first developed by Linus Torvalds in 1991. The operating system is based on the Linux kernel, which acts as the core component, managing hardware resources such as memory, CPU, and input/output devices. Unlike proprietary operating systems like Windows or macOS, Linux is freely available to anyone, allowing users to access, modify, and redistribute the source code. This openness has led to a vibrant community of developers and enthusiasts who continuously contribute to improving the system.
 
-  It has all the features you would expect in a modern fully-fledged
-  Unix, including true multitasking, virtual memory, shared libraries,
-  demand loading, shared copy-on-write executables, proper memory
-  management and TCP/IP networking. 
+One of the defining features of Linux is its flexibility and customizability. It can be tailored to suit a wide range of use cases, from personal desktop computing to large-scale enterprise servers. Linux operates in various forms known as distributions or "distros," each offering different features, package management systems, and user interfaces. Popular Linux distributions include Ubuntu, Fedora, Debian, and CentOS, each catering to different needs, such as ease of use, stability, or advanced system administration capabilities.
 
-  It is distributed under the GNU General Public License - see the
-  accompanying COPYING file for more details. 
+Linux is known for its stability, security, and performance. It supports multitasking, allowing multiple processes to run simultaneously, and is designed to be multi-user, which means multiple individuals can use the system without interfering with each other. Additionally, Linux has built-in security features like user permissions, firewalls, and encryption, making it a popular choice for web servers, networked systems, and environments that require strong protection. Its versatility and robustness make it ideal for everything from desktop use and mobile devices (Android, for example) to powering most of the world's web servers and cloud infrastructure. 
 
 ON WHAT HARDWARE DOES IT RUN?
 
   Linux was first developed for 386/486-based PCs.  These days it also
   runs on ARMs, DEC Alphas, SUN Sparcs, M68000 machines (like Atari and
   Amiga), MIPS and PowerPC, and others.
-
-DOCUMENTATION:
-
- - There is a lot of documentation available both in electronic form on
-   the Internet and in books, both Linux-specific and pertaining to
-   general UNIX questions.  I'd recommend looking into the documentation
-   subdirectories on any Linux FTP site for the LDP (Linux Documentation
-   Project) books.  This README is not meant to be documentation on the
-   system: there are much better sources available.
-
- - There are various README files in the Documentation/ subdirectory:
-   these typically contain kernel-specific installation notes for some 
-   drivers for example. See ./Documentation/00-INDEX for a list of what
-   is contained in each file.  Please read the Changes file, as it
-   contains information about the problems, which may result by upgrading
-   your kernel.
 
 INSTALLING the kernel:
 
