@@ -23,11 +23,12 @@ in various files in the Documentation directory.  See DOCUMENTATION below.
 
 WHAT IS LINUX?
 
-  Linux is an open-source, Unix-like operating system that was first developed by Linus Torvalds in 1991. The operating system is based on the Linux kernel, which acts as the core component, managing hardware resources such as memory, CPU, and input/output devices. Unlike proprietary operating systems like Windows or macOS, Linux is freely available to anyone, allowing users to access, modify, and redistribute the source code. This openness has led to a vibrant community of developers and enthusiasts who continuously contribute to improving the system.
+  Linux is an open-source, Unix-like operating system that was first developed by Linus Torvalds in 1991. The operating system is based on the Linux kernel,
+which acts as the core component, managing hardware resources such as memory,
+CPU, and input/output devices. Unlike proprietary operating systems like Windows or macOS,
+Linux is freely available to anyone, allowing users to access, modify, and redistribute the source code.
+This openness has led to a vibrant community of developers and enthusiasts who continuously contribute to improving the system.
 
-One of the defining features of Linux is its flexibility and customizability. It can be tailored to suit a wide range of use cases, from personal desktop computing to large-scale enterprise servers. Linux operates in various forms known as distributions or "distros," each offering different features, package management systems, and user interfaces. Popular Linux distributions include Ubuntu, Fedora, Debian, and CentOS, each catering to different needs, such as ease of use, stability, or advanced system administration capabilities.
-
-Linux is known for its stability, security, and performance. It supports multitasking, allowing multiple processes to run simultaneously, and is designed to be multi-user, which means multiple individuals can use the system without interfering with each other. Additionally, Linux has built-in security features like user permissions, firewalls, and encryption, making it a popular choice for web servers, networked systems, and environments that require strong protection. Its versatility and robustness make it ideal for everything from desktop use and mobile devices (Android, for example) to powering most of the world's web servers and cloud infrastructure. 
 
 ON WHAT HARDWARE DOES IT RUN?
 
