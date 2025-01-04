@@ -176,21 +176,22 @@ static void free_module(struct module *mod)
     if (mod == NULL)
         return;
 
+    static void free_module(struct module *mod)
+{
+    if (mod == NULL)
+        return;
     /* Unlink module from the module list */
     struct module *prev = module_list;
     while (prev != NULL && prev->next != mod)
         prev = prev->next;
-
     if (prev != NULL)
         prev->next = mod->next;
-
     /* Free the allocated memory for the module */
     kfree(mod->name);  /* Free module name */
     kfree(mod);         /* Free the module structure itself */
     printk(KERN_INFO "free_module: Module '%s' cleaned up successfully\n", mod->name);
 }
 
-#endif /* CONFIG_MODULES */
 
 
 asmlinkage long
