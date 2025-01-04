@@ -6,6 +6,7 @@
 #include <linux/smp_lock.h>
 #include <asm/pgalloc.h>
 #include <linux/init.h>
+#include <linux/slab.h>  // For kmalloc/kfree
 
 /*
  * Originally by Anonymous (as far as I know...)
@@ -17,7 +18,7 @@
  * This source is covered by the GNU GPL, the same as all kernel sources.
  */
 
-#ifdef CONFIG_MODULES		/* a *big* #ifdef block... */
+#ifdef CONFIG_MODULES        /* a *big* #ifdef block... */
 
 extern struct module_symbol __start___ksymtab[];
 extern struct module_symbol __stop___ksymtab[];
@@ -25,24 +26,23 @@ extern struct module_symbol __stop___ksymtab[];
 extern const struct exception_table_entry __start___ex_table[];
 extern const struct exception_table_entry __stop___ex_table[];
 
-static struct module kernel_module =
-{
-	sizeof(struct module),	/* size_of_struct */
-	NULL,			/* next */
-	"",			/* name */
-	0,			/* size */
-	{ATOMIC_INIT(1)},	/* usecount */
-	MOD_RUNNING,		/* flags */
-	0,			/* nsyms -- to filled in in init_modules */
-	0,			/* ndeps */
-	__start___ksymtab,	/* syms */
-	NULL,			/* deps */
-	NULL,			/* refs */
-	NULL,			/* init */
-	NULL,			/* cleanup */
-	__start___ex_table,	/* ex_table_start */
-	__stop___ex_table,	/* ex_table_end */
-	/* Rest are NULL */
+static struct module kernel_module = {
+    sizeof(struct module),    /* size_of_struct */
+    NULL,                      /* next */
+    "",                        /* name */
+    0,                         /* size */
+    {ATOMIC_INIT(1)},          /* usecount */
+    MOD_RUNNING,               /* flags */
+    0,                         /* nsyms -- to be filled in init_modules */
+    0,                         /* ndeps */
+    __start___ksymtab,         /* syms */
+    NULL,                      /* deps */
+    NULL,                      /* refs */
+    NULL,                      /* init */
+    NULL,                      /* cleanup */
+    __start___ex_table,        /* ex_table_start */
+    __stop___ex_table,         /* ex_table_end */
+    /* Rest are NULL */
 };
 
 struct module *module_list = &kernel_module;
@@ -50,7 +50,7 @@ struct module *module_list = &kernel_module;
 static long get_mod_name(const char *user_name, char **buf);
 static void put_mod_name(char *buf);
 static struct module *find_module(const char *name);
-static void free_module(struct module *, int tag_freed);
+static void free_module(struct module *mod);
 
 
 /*
@@ -59,10 +59,10 @@ static void free_module(struct module *, int tag_freed);
 
 void __init init_modules(void)
 {
-	kernel_module.nsyms = __stop___ksymtab - __start___ksymtab;
+    kernel_module.nsyms = __stop___ksymtab - __start___ksymtab;
 
 #ifdef __alpha__
-	__asm__("stq $29,%0" : "=m"(kernel_module.gp));
+    __asm__("stq $29,%0" : "=m"(kernel_module.gp));
 #endif
 }
 
@@ -73,31 +73,31 @@ void __init init_modules(void)
 static inline long
 get_mod_name(const char *user_name, char **buf)
 {
-	unsigned long page;
-	long retval;
+    unsigned long page;
+    long retval;
 
-	page = __get_free_page(GFP_KERNEL);
-	if (!page)
-		return -ENOMEM;
+    page = __get_free_page(GFP_KERNEL);
+    if (!page)
+        return -ENOMEM;
 
-	retval = strncpy_from_user((char *)page, user_name, PAGE_SIZE);
-	if (retval > 0) {
-		if (retval < PAGE_SIZE) {
-			*buf = (char *)page;
-			return retval;
-		}
-		retval = -ENAMETOOLONG;
-	} else if (!retval)
-		retval = -EINVAL;
+    retval = strncpy_from_user((char *)page, user_name, PAGE_SIZE);
+    if (retval > 0) {
+        if (retval < PAGE_SIZE) {
+            *buf = (char *)page;
+            return retval;
+        }
+        retval = -ENAMETOOLONG;
+    } else if (!retval)
+        retval = -EINVAL;
 
-	free_page(page);
-	return retval;
+    free_page(page);
+    return retval;
 }
 
 static inline void
 put_mod_name(char *buf)
 {
-	free_page((unsigned long)buf);
+    free_page((unsigned long)buf);
 }
 
 /*
@@ -107,55 +107,91 @@ put_mod_name(char *buf)
 asmlinkage unsigned long
 sys_create_module(const char *name_user, size_t size)
 {
-	char *name;
-	long namelen, error;
-	struct module *mod;
+    char *name;
+    long namelen, error;
+    struct module *mod;
 
-	lock_kernel();
-	if (!capable(CAP_SYS_MODULE)) {
-		error = -EPERM;
-		goto err0;
-	}
-	if ((namelen = get_mod_name(name_user, &name)) < 0) {
-		error = namelen;
-		goto err0;
-	}
-	if (size < sizeof(struct module)+namelen) {
-		error = -EINVAL;
-		goto err1;
-	}
-	if (find_module(name) != NULL) {
-		error = -EEXIST;
-		goto err1;
-	}
-	if ((mod = (struct module *)module_map(size)) == NULL) {
-		error = -ENOMEM;
-		goto err1;
-	}
+    lock_kernel();
+    
+    if (!capable(CAP_SYS_MODULE)) {
+        printk(KERN_ERR "sys_create_module: Insufficient permissions\n");
+        error = -EPERM;
+        goto err0;
+    }
 
-	memset(mod, 0, sizeof(*mod));
-	mod->size_of_struct = sizeof(*mod);
-	mod->next = module_list;
-	mod->name = (char *)(mod + 1);
-	mod->size = size;
-	memcpy((char*)(mod+1), name, namelen+1);
+    if ((namelen = get_mod_name(name_user, &name)) < 0) {
+        printk(KERN_ERR "sys_create_module: Failed to get module name, error %ld\n", namelen);
+        error = namelen;
+        goto err0;
+    }
 
-	put_mod_name(name);
+    if (size < sizeof(struct module) + namelen) {
+        printk(KERN_ERR "sys_create_module: Invalid size provided for module\n");
+        error = -EINVAL;
+        goto err1;
+    }
 
-	module_list = mod;	/* link it in */
+    if (find_module(name) != NULL) {
+        printk(KERN_ERR "sys_create_module: Module '%s' already exists\n", name);
+        error = -EEXIST;
+        goto err1;
+    }
 
-	error = (long) mod;
-	goto err0;
+    mod = kmalloc(size, GFP_KERNEL);
+    if (!mod) {
+        printk(KERN_ERR "sys_create_module: Failed to allocate memory for module\n");
+        error = -ENOMEM;
+        goto err1;
+    }
+
+    memset(mod, 0, sizeof(*mod));
+    mod->size_of_struct = sizeof(*mod);
+    mod->next = module_list;
+    mod->name = (char *)(mod + 1);
+    mod->size = size;
+    memcpy((char *)(mod + 1), name, namelen + 1);
+
+    put_mod_name(name);
+
+    module_list = mod;    /* link it in */
+
+    printk(KERN_INFO "sys_create_module: Module '%s' created successfully\n", mod->name);
+
+    error = (long) mod;
+    goto err0;
+
 err1:
-	put_mod_name(name);
+    put_mod_name(name);
 err0:
-	unlock_kernel();
-	return error;
+    unlock_kernel();
+    return error;
 }
 
 /*
  * Initialize a module.
  */
+
+static void free_module(struct module *mod)
+{
+    if (mod == NULL)
+        return;
+
+    /* Unlink module from the module list */
+    struct module *prev = module_list;
+    while (prev != NULL && prev->next != mod)
+        prev = prev->next;
+
+    if (prev != NULL)
+        prev->next = mod->next;
+
+    /* Free the allocated memory for the module */
+    kfree(mod->name);  /* Free module name */
+    kfree(mod);         /* Free the module structure itself */
+    printk(KERN_INFO "free_module: Module '%s' cleaned up successfully\n", mod->name);
+}
+
+#endif /* CONFIG_MODULES */
+
 
 asmlinkage long
 sys_init_module(const char *name_user, struct module *mod_user)
