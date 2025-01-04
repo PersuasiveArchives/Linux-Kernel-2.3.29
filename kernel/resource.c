@@ -31,7 +31,8 @@ static char * do_resource_list(struct resource *entry, const char *fmt, int offs
 		const char *name = entry->name;
 		unsigned long from, to;
 
-		if ((int) (end-buf) < 80)
+		// Check if there is enough space in the buffer
+		if ((int) (end - buf) < 80)
 			return buf;
 
 		from = entry->start;
@@ -39,9 +40,12 @@ static char * do_resource_list(struct resource *entry, const char *fmt, int offs
 		if (!name)
 			name = "<BAD>";
 
-		buf += sprintf(buf, fmt + offset, from, to, name);
+		buf += snprintf(buf, end - buf, fmt + offset, from, to, name);
+
+		// Recursively handle child resources
 		if (entry->child)
-			buf = do_resource_list(entry->child, fmt, offset-2, buf, end);
+			buf = do_resource_list(entry->child, fmt, offset - 2, buf, end);
+
 		entry = entry->sibling;
 	}
 
@@ -50,17 +54,19 @@ static char * do_resource_list(struct resource *entry, const char *fmt, int offs
 
 int get_resource_list(struct resource *root, char *buf, int size)
 {
-	char *fmt;
+	char *fmt = "        %08lx-%08lx : %s\n";
 	int retval;
 
-	fmt = "        %08lx-%08lx : %s\n";
 	if (root == &ioport_resource)
 		fmt = "        %04lx-%04lx : %s\n";
+
+	// Use read lock for accessing resources
 	read_lock(&resource_lock);
 	retval = do_resource_list(root->child, fmt, 8, buf, buf + size) - buf;
 	read_unlock(&resource_lock);
+
 	return retval;
-}	
+}
 
 /* Return the conflict entry if you can't request it */
 static struct resource * __request_resource(struct resource *root, struct resource *new)
@@ -75,8 +81,9 @@ static struct resource * __request_resource(struct resource *root, struct resour
 		return root;
 	if (end > root->end)
 		return root;
+
 	p = &root->child;
-	for (;;) {
+	while (1) {
 		tmp = *p;
 		if (!tmp || tmp->start > end) {
 			new->sibling = tmp;
@@ -98,24 +105,23 @@ int request_resource(struct resource *root, struct resource *new)
 	write_lock(&resource_lock);
 	conflict = __request_resource(root, new);
 	write_unlock(&resource_lock);
+
 	return conflict ? -EBUSY : 0;
 }
 
 int release_resource(struct resource *old)
 {
-	struct resource *tmp, **p;
+	struct resource **p;
 
 	p = &old->parent->child;
-	for (;;) {
-		tmp = *p;
-		if (!tmp)
-			break;
-		if (tmp == old) {
-			*p = tmp->sibling;
+
+	while (*p) {
+		if (*p == old) {
+			*p = old->sibling;
 			old->parent = NULL;
 			return 0;
 		}
-		p = &tmp->sibling;
+		p = &(*p)->sibling;
 	}
 	return -EINVAL;
 }
@@ -126,30 +132,29 @@ int release_resource(struct resource *old)
 static int find_resource(struct resource *root, struct resource *new,
 			 unsigned long size,
 			 unsigned long min, unsigned long max,
-			 unsigned long align, struct pci_dev * dev)
+			 unsigned long align, struct pci_dev *dev)
 {
 	struct resource *this = root->child;
-	unsigned long start, end;
+	unsigned long start = root->start;
+	unsigned long end;
 
-	start = root->start;
-	for(;;) {
-		if (this)
-			end = this->start;
-		else
-			end = root->end;
+	while (this) {
+		end = this->start;
 		if (start < min)
 			start = min;
 		if (end > max)
 			end = max;
 		start = (start + align - 1) & ~(align - 1);
-		start = resource_fixup (dev, new, start, size);
-		if (start < end && end - start + 1 >= size) {
+
+		// Fixup the resource based on the device
+		start = resource_fixup(dev, new, start, size);
+
+		if (start < end && end - start >= size) {
 			new->start = start;
 			new->end = start + size - 1;
 			return 0;
 		}
-		if (!this)
-			break;
+
 		start = this->end + 1;
 		this = this->sibling;
 	}
@@ -162,7 +167,7 @@ static int find_resource(struct resource *root, struct resource *new,
 int allocate_resource(struct resource *root, struct resource *new,
 		      unsigned long size,
 		      unsigned long min, unsigned long max,
-		      unsigned long align, struct pci_dev * dev)
+		      unsigned long align, struct pci_dev *dev)
 {
 	int err;
 
@@ -171,59 +176,50 @@ int allocate_resource(struct resource *root, struct resource *new,
 	if (err >= 0 && __request_resource(root, new))
 		err = -EBUSY;
 	write_unlock(&resource_lock);
+
 	return err;
 }
 
 /*
- * This is compatibility stuff for IO resources.
- *
- * Note how this, unlike the above, knows about
- * the IO flag meanings (busy etc).
- *
- * Request-region creates a new busy region.
- *
- * Check-region returns non-zero if the area is already busy
- *
- * Release-region releases a matching busy region.
+ * Compatibility functions for IO resources.
  */
 struct resource * __request_region(struct resource *parent, unsigned long start, unsigned long n, const char *name)
 {
 	struct resource *res = kmalloc(sizeof(*res), GFP_KERNEL);
 
-	if (res) {
-		memset(res, 0, sizeof(*res));
-		res->name = name;
-		res->start = start;
-		res->end = start + n - 1;
-		res->flags = IORESOURCE_BUSY;
+	if (!res)
+		return NULL;
 
-		write_lock(&resource_lock);
+	memset(res, 0, sizeof(*res));
+	res->name = name;
+	res->start = start;
+	res->end = start + n - 1;
+	res->flags = IORESOURCE_BUSY;
 
-		for (;;) {
-			struct resource *conflict;
-
-			conflict = __request_resource(parent, res);
-			if (!conflict)
-				break;
-			if (conflict != parent) {
-				parent = conflict;
-				if (!(conflict->flags & IORESOURCE_BUSY))
-					continue;
-			}
-
-			/* Uhhuh, that didn't work out.. */
-			kfree(res);
-			res = NULL;
+	write_lock(&resource_lock);
+	while (1) {
+		struct resource *conflict = __request_resource(parent, res);
+		if (!conflict)
 			break;
+
+		if (conflict != parent) {
+			parent = conflict;
+			if (!(conflict->flags & IORESOURCE_BUSY))
+				continue;
 		}
-		write_unlock(&resource_lock);
+
+		// Resource allocation failed, free memory
+		kfree(res);
+		return NULL;
 	}
+	write_unlock(&resource_lock);
+
 	return res;
 }
 
 int __check_region(struct resource *parent, unsigned long start, unsigned long n)
 {
-	struct resource * res;
+	struct resource *res;
 
 	res = __request_region(parent, start, n, "check-region");
 	if (!res)
@@ -237,23 +233,13 @@ int __check_region(struct resource *parent, unsigned long start, unsigned long n
 void __release_region(struct resource *parent, unsigned long start, unsigned long n)
 {
 	struct resource **p;
-	unsigned long end;
+	unsigned long end = start + n - 1;
 
 	p = &parent->child;
-	end = start + n - 1;
-
-	for (;;) {
+	while (*p) {
 		struct resource *res = *p;
 
-		if (!res)
-			break;
-		if (res->start <= start && res->end >= end) {
-			if (!(res->flags & IORESOURCE_BUSY)) {
-				p = &res->child;
-				continue;
-			}
-			if (res->start != start || res->end != end)
-				break;
+		if (res->start == start && res->end == end && !(res->flags & IORESOURCE_BUSY)) {
 			*p = res->sibling;
 			kfree(res);
 			return;
@@ -264,30 +250,29 @@ void __release_region(struct resource *parent, unsigned long start, unsigned lon
 }
 
 /*
- * Called from init/main.c to reserve IO ports.
+ * Reserve IO ports or memory regions during boot.
  */
 #define MAXRESERVE 4
 static int __init reserve_setup(char *str)
 {
-	int opt = 2, io_start, io_num;
-	static int reserved = 0;
+	int io_start, io_num, reserved = 0;
 	static struct resource reserve[MAXRESERVE];
 
-    while (opt==2) {
-		int x = reserved;
+	while (get_option(&str, &io_start) == 2) {
+		if (get_option(&str, &io_num) == 0)
+			break;
 
-        if (get_option (&str, &io_start) != 2) break;
-        if (get_option (&str, &io_num)   == 0) break;
-		if (x < MAXRESERVE) {
-			struct resource *res = reserve + x;
+		if (reserved < MAXRESERVE) {
+			struct resource *res = &reserve[reserved];
 			res->name = "reserved";
 			res->start = io_start;
 			res->end = io_start + io_num - 1;
 			res->child = NULL;
-			if (request_resource(res->start >= 0x10000 ? &iomem_resource : &ioport_resource, res) == 0)
-				reserved = x+1;
+			if (request_resource(io_start >= 0x10000 ? &iomem_resource : &ioport_resource, res) == 0)
+				reserved++;
 		}
 	}
+
 	return 1;
 }
 
